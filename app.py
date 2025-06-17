@@ -24,6 +24,7 @@ st.set_page_config(
 )
 
 # -------------------- Helper Functions --------------------
+# @st.cache_data is crucial here for performance
 @st.cache_data(show_spinner=False)
 def get_sentiment_and_score(text):
     """
@@ -35,7 +36,7 @@ def get_sentiment_and_score(text):
 
     prompt = f"""Analyze the sentiment of the following feedback and classify it as Positive, Negative, or Neutral.
     Then, provide a sentiment score: -1 for Negative, 0 for Neutral, and 1 for Positive.
-    Return the output in the format: Sentiment: [Sentiment], Score: [Score]
+    Return the output in the exact format: Sentiment: [Sentiment], Score: [Score]
     Feedback: "{text}"\n"""
     try:
         response = model.generate_content(prompt)
@@ -45,26 +46,20 @@ def get_sentiment_and_score(text):
         score = np.nan
 
         # Robust parsing of the LLM output
-        if "Sentiment:" in result:
-            sentiment_start = result.find("Sentiment:") + len("Sentiment:")
-            sentiment_end = result.find(",", sentiment_start)
-            if sentiment_end == -1: # If no comma after sentiment
-                sentiment_end = len(result)
-            sentiment = result[sentiment_start:sentiment_end].strip()
+        sentiment_match = re.search(r"Sentiment:\s*([A-Za-z]+)", result)
+        score_match = re.search(r"Score:\s*([-+]?\d*\.?\d+)", result)
 
-        if "Score:" in result:
-            score_start = result.find("Score:") + len("Score:")
-            score_end = result.find(",", score_start)
-            if score_end == -1: # If no comma after score
-                score_end = len(result)
+        if sentiment_match:
+            sentiment = sentiment_match.group(1).strip()
+        if score_match:
             try:
-                score = float(result[score_start:score_end].strip())
+                score = float(score_match.group(1).strip())
             except ValueError:
                 pass # Score remains NaN if conversion fails
 
         return sentiment, score
     except Exception as e:
-        st.warning(f"Error classifying sentiment for '{text[:50]}...': {e}")
+        # st.warning(f"Error classifying sentiment for '{text[:50]}...': {e}") # Too many warnings can clutter
         return "Unknown", np.nan
 
 @st.cache_data(show_spinner=False)
@@ -85,7 +80,7 @@ def summarize_question(question, responses, n_points=5, creativity=0.7):
         )
         return result.text.strip()
     except Exception as e:
-        st.warning(f"Error summarizing question '{question}': {e}")
+        # st.warning(f"Error summarizing question '{question}': {e}")
         return "Could not extract insights."
 
 @st.cache_data(show_spinner=False)
@@ -106,7 +101,7 @@ def extract_topics(responses, n_topics=3, creativity=0.7):
         )
         return [topic.strip() for topic in result.text.strip().split(',') if topic.strip()]
     except Exception as e:
-        st.warning(f"Error extracting topics: {e}")
+        # st.warning(f"Error extracting topics: {e}")
         return []
 
 @st.cache_data(show_spinner=False)
@@ -125,9 +120,11 @@ def extract_key_phrases(responses, n_phrases=5, creativity=0.7):
             prompt,
             generation_config=genai.types.GenerationConfig(temperature=creativity)
         )
-        return [phrase.strip().lstrip('- ').replace('* ', '') for phrase in result.text.strip().split('\n') if phrase.strip()]
+        # Clean up bullet points from LLM output
+        phrases = [phrase.strip().lstrip('- ').replace('* ', '') for phrase in result.text.strip().split('\n') if phrase.strip()]
+        return [phrase for phrase in phrases if phrase] # Remove empty strings
     except Exception as e:
-        st.warning(f"Error extracting key phrases: {e}")
+        # st.warning(f"Error extracting key phrases: {e}")
         return []
 
 @st.cache_data(show_spinner=False)
@@ -146,7 +143,7 @@ def generate_recommendations(negative_feedback_summary, creativity=0.7):
         )
         return result.text.strip()
     except Exception as e:
-        st.warning(f"Error generating recommendations: {e}")
+        # st.warning(f"Error generating recommendations: {e}")
         return "Could not generate recommendations."
 
 
@@ -180,16 +177,40 @@ def download_analysis(df):
 
 def show_sample_data():
     sample = pd.DataFrame({
-        "Timestamp": ["2024-01-15", "2024-01-16", "2024-02-01", "2024-02-10", "2024-03-05"],
-        "Service Quality": ["Excellent service, very prompt!", "Good, but wait times were a bit long.", "Friendly staff, no complaints.", "Service was poor, really slow response.", "Very efficient and helpful."],
-        "Product Features": ["Love the new features, exactly what I needed.", "Features are okay, could be more intuitive.", "Works as expected, no issues.", "Missing key features I use daily.", "Great new update!"],
-        "Overall Experience (1-5)": [5, 4, 5, 2, 5]
+        "Timestamp": ["2024-01-15", "2024-01-16", "2024-02-01", "2024-02-10", "2024-03-05", "2024-03-10", "2024-04-01", "2024-04-15", "2024-05-01", "2024-05-10"],
+        "Service Quality": [
+            "Excellent service, very prompt and helpful!",
+            "Good, but wait times were a bit long. Staff seemed overwhelmed.",
+            "Friendly staff, no complaints, resolved issue quickly.",
+            "Service was poor, really slow response. Unacceptable delays.",
+            "Very efficient and helpful, problem solved in minutes.",
+            "Okay service, but the online portal is confusing.",
+            "Quick and professional, very satisfied with the assistance.",
+            "Long hold times, very frustrating experience.",
+            "Outstanding support! Knowledgeable and polite.",
+            "Customer service needs improvement, couldn't get a clear answer."
+        ],
+        "Product Features": [
+            "Love the new features, exactly what I needed. Very intuitive.",
+            "Features are okay, could be more intuitive. Some bugs noticed.",
+            "Works as expected, no issues. Simple and reliable.",
+            "Missing key features I use daily. Very basic compared to competitors.",
+            "Great new update! Performance is much better.",
+            "Some features are clunky, need better integration.",
+            "The search function is terrible, hard to find what I need.",
+            "Very comprehensive set of features, impressed by the depth.",
+            "User interface is not friendly, steep learning curve.",
+            "Could use more customization options."
+        ],
+        "Overall Experience (1-5)": [5, 4, 5, 2, 5, 3, 5, 2, 4, 3]
     })
     st.write("**Sample Data Preview:**")
     st.dataframe(sample, use_container_width=True)
     buffer = io.StringIO()
     sample.to_csv(buffer, index=False)
     st.download_button("Download Sample CSV", buffer.getvalue(), file_name="sample_feedback_exec.csv")
+
+import re # Import regex for robust parsing
 
 # -------------------- Sidebar --------------------
 with st.sidebar:
@@ -206,6 +227,14 @@ with st.sidebar:
         "LLM Creativity (Temperature)",
         min_value=0.0, max_value=1.0, value=0.4, step=0.1,
         help="Higher values make summaries/topics/recommendations more creative and less deterministic. Lower values are more focused and factual. Recommended for executive insights: 0.3-0.5"
+    )
+    max_rows_to_process = st.number_input(
+        "Max Rows for LLM Analysis (Open-ended)",
+        min_value=10,
+        max_value=1000, # Increased max for larger datasets, can be even higher
+        value=100, # Default to 100 for quicker analysis
+        step=10,
+        help="To speed up analysis, limit the number of open-ended responses processed by the LLM. Set to a higher value for full dataset analysis (may take longer)."
     )
     st.markdown("---")
     st.markdown("### 💬 Ask FeedbackBot")
@@ -255,9 +284,15 @@ if uploaded_file:
         try:
             # Attempt to convert to datetime, inferring format
             analysis_df[selected_date_column] = pd.to_datetime(analysis_df[selected_date_column], errors='coerce')
-            analysis_df.dropna(subset=[selected_date_column], inplace=True) # Drop rows where date parsing failed
+            # Drop rows where date parsing failed
+            initial_rows = len(analysis_df)
+            analysis_df.dropna(subset=[selected_date_column], inplace=True)
+            dropped_rows = initial_rows - len(analysis_df)
+            if dropped_rows > 0:
+                st.warning(f"Date column '{selected_date_column}' parsed with {dropped_rows} invalid date entries removed.")
+            else:
+                st.success(f"Date column '{selected_date_column}' successfully parsed.")
             analysis_df.sort_values(by=selected_date_column, inplace=True)
-            st.success(f"Date column '{selected_date_column}' successfully parsed. {len(df) - len(analysis_df)} rows dropped due to invalid dates.")
         except Exception as e:
             st.error(f"Could not parse date column '{selected_date_column}'. Please ensure it's in a valid date format. Error: {e}")
             selected_date_column = "None (Skip Trend Analysis)" # Revert if parsing fails
@@ -300,62 +335,78 @@ if uploaded_file:
 
         elif is_open_ended:
             st.markdown("**🗣 Open-ended Responses Detected**")
+
+            # --- Apply Max Rows to Process ---
+            # Sample responses if there are too many, for performance. Keep original index for updates.
+            responses_to_process = responses.sample(n=min(len(responses), max_rows_to_process), random_state=42)
+            st.info(f"Analyzing {len(responses_to_process)} of {len(responses)} open-ended responses for this question to speed up analysis. Adjust 'Max Rows for LLM Analysis' in sidebar for more.")
+
             current_sentiments = []
             current_scores = []
-            with st.spinner(f"Analyzing sentiments for '{column}'..."):
-                for text in responses:
-                    sentiment, score = get_sentiment_and_score(text)
-                    current_sentiments.append(sentiment)
-                    current_scores.append(score)
+            progress_text = f"Analyzing sentiments for '{column}'..."
+            my_bar = st.progress(0, text=progress_text)
 
-            # Assign sentiment to analysis_df
-            temp_df_for_sentiment = analysis_df.loc[responses.index].copy() # Ensure index alignment
-            temp_df_for_sentiment[column + "_Sentiment"] = current_sentiments
-            temp_df_for_sentiment[column + "_Sentiment_Score"] = current_scores
-            analysis_df.update(temp_df_for_sentiment[[column + "_Sentiment", column + "_Sentiment_Score"]])
+            for i, text in enumerate(responses_to_process):
+                sentiment, score = get_sentiment_and_score(text)
+                current_sentiments.append(sentiment)
+                current_scores.append(score)
+                my_bar.progress((i + 1) / len(responses_to_process), text=f"{progress_text} ({i+1}/{len(responses_to_process)})")
+            my_bar.empty() # Clear the progress bar after completion
+
+            # Create temporary Series aligned with original 'responses' index, then update analysis_df
+            sentiment_series = pd.Series(current_sentiments, index=responses_to_process.index)
+            score_series = pd.Series(current_scores, index=responses_to_process.index)
+
+            analysis_df.loc[responses_to_process.index, column + "_Sentiment"] = sentiment_series
+            analysis_df.loc[responses_to_process.index, column + "_Sentiment_Score"] = score_series
 
             sentiment_columns.append(column + "_Sentiment_Score")
 
-            # Aggregate all positive/negative responses for executive summary
-            all_positive_responses = pd.concat([all_positive_responses, responses[pd.Series(current_sentiments) == 'Positive'].reset_index(drop=True)])
-            all_negative_responses = pd.concat([all_negative_responses, responses[pd.Series(current_sentiments) == 'Negative'].reset_index(drop=True)])
+            # Aggregate all positive/negative responses for executive summary (using all responses, not just processed subset)
+            # Filter the *original* responses based on sentiments from *processed* subset
+            all_positive_responses = pd.concat([all_positive_responses, responses_to_process[sentiment_series == 'Positive'].reset_index(drop=True)])
+            all_negative_responses = pd.concat([all_negative_responses, responses_to_process[sentiment_series == 'Negative'].reset_index(drop=True)])
 
 
+            # Display charts/summaries based on the processed subset
             sentiment_counts = pd.Series(current_sentiments).value_counts().reset_index()
             sentiment_counts.columns = ["Sentiment", "Count"]
-            fig = px.bar(sentiment_counts, x="Sentiment", y="Count", color="Sentiment", title=f"Sentiment Distribution for '{column}'")
+            fig = px.bar(sentiment_counts, x="Sentiment", y="Count", color="Sentiment", title=f"Sentiment Distribution for '{column}' (Sampled)")
             st.plotly_chart(fig, use_container_width=True)
 
             if len(current_scores) > 0 and not pd.Series(current_scores).isnull().all():
                 avg_score = np.nanmean(current_scores)
-                st.info(f"**Average Sentiment Score for '{column}':** {avg_score:.2f} (closer to 1 is more positive, -1 more negative)")
+                st.info(f"**Average Sentiment Score for '{column}' (Sampled):** {avg_score:.2f} (closer to 1 is more positive, -1 more negative)")
 
-            with st.expander(f"Show Word Cloud for '{column}'"):
-                plot_wordcloud(responses)
+            with st.expander(f"Show Word Cloud for '{column}' (Sampled)"):
+                plot_wordcloud(responses_to_process) # Use sampled responses for word cloud
 
-            st.markdown("**💡 Key Takeaways (LLM Summary)**")
+            st.markdown("**💡 Key Takeaways (LLM Summary - Sampled)**")
             n_summary_points = st.slider(f"Number of summary points for '{column}'", 3, 10, 5, key=f"summary_slider_{column}")
-            summary = summarize_question(column, responses, n_points=n_summary_points, creativity=llm_creativity)
+            summary = summarize_question(column, responses_to_process, n_points=n_summary_points, creativity=llm_creativity)
             st.success(summary)
 
-            st.markdown("**🎯 Top Key Phrases (LLM Extracted)**")
+            st.markdown("**🎯 Top Key Phrases (LLM Extracted - Sampled)**")
             n_phrases_extract = st.slider(f"Number of key phrases for '{column}'", 3, 10, 5, key=f"phrases_slider_{column}")
-            key_phrases = extract_key_phrases(responses, n_phrases=n_phrases_extract, creativity=llm_creativity)
+            key_phrases = extract_key_phrases(responses_to_process, n_phrases=n_phrases_extract, creativity=llm_creativity)
             if key_phrases:
                 for phrase in key_phrases:
                     st.markdown(f"- {phrase}")
             else:
-                st.info("Could not extract distinct key phrases.")
+                st.info("Could not extract distinct key phrases from sampled responses.")
 
             # Recommendations only for questions with negative sentiment
-            negative_responses_for_column = responses[pd.Series(current_sentiments) == 'Negative']
+            negative_responses_for_column = responses_to_process[sentiment_series == 'Negative']
             if not negative_responses_for_column.empty:
-                st.markdown("**🛠️ Actionable Recommendations (from Negative Feedback)**")
+                st.markdown("**🛠️ Actionable Recommendations (from Negative Feedback - Sampled)**")
                 negative_summary_for_column = summarize_question(column, negative_responses_for_column, n_points=3, creativity=llm_creativity)
                 recommendations = generate_recommendations(negative_summary_for_column, creativity=llm_creativity)
                 st.warning(recommendations)
+            else:
+                st.info("No negative feedback found in sampled responses for this question to generate recommendations.")
 
             with st.expander(f"🧾 Sample Responses for '{column}'"):
+                # Still show original, random samples for display
                 for i, resp in enumerate(responses.sample(min(5, len(responses)), random_state=42), 1):
                     st.markdown(f"- {resp}")
 
@@ -369,6 +420,7 @@ if uploaded_file:
     # --- Executive Summary Dashboard Content ---
     st.markdown("---")
     st.subheader("📊 Executive Summary Dashboard - Aggregated Insights")
+    st.info("Insights below are aggregated from the *sampled* open-ended responses.")
 
     if not all_positive_responses.empty or not all_negative_responses.empty:
         col1, col2 = st.columns(2)
@@ -382,9 +434,9 @@ if uploaded_file:
                     for factor in success_factors:
                         st.markdown(f"- **{factor}**")
                 else:
-                    st.info("No significant success factors identified.")
+                    st.info("No significant success factors identified from sampled responses.")
             else:
-                st.info("No positive feedback found across all open-ended questions.")
+                st.info("No positive feedback found across all open-ended questions in sampled data.")
 
         with col2:
             st.markdown("#### 🚩 Top Pain Points")
@@ -395,9 +447,9 @@ if uploaded_file:
                     for point in pain_points:
                         st.markdown(f"- **{point}**")
                 else:
-                    st.info("No significant pain points identified.")
+                    st.info("No significant pain points identified from sampled responses.")
             else:
-                st.info("No negative feedback found across all open-ended questions.")
+                st.info("No negative feedback found across all open-ended questions in sampled data.")
 
         if not all_negative_responses.empty:
             st.markdown("#### 💡 Overall Actionable Recommendations")
@@ -405,9 +457,10 @@ if uploaded_file:
             overall_recommendations = generate_recommendations(overall_negative_summary, creativity=llm_creativity)
             st.success(overall_recommendations)
         else:
-            st.info("No overall negative feedback to generate recommendations.")
+            st.info("No overall negative feedback from sampled data to generate recommendations.")
     else:
-        st.info("No open-ended feedback found for executive summary (Success Factors/Pain Points).")
+        st.info("No open-ended feedback found for executive summary (Success Factors/Pain Points) in sampled data.")
+
 
     # Cross-question correlation (numerical ratings vs. sentiment scores)
     numerical_rating_columns = [col for col in original_columns if pd.api.types.is_numeric_dtype(df[col]) and df[col].nunique() > 1 and df[col].max() > 1]
@@ -415,12 +468,12 @@ if uploaded_file:
     if sentiment_columns and numerical_rating_columns:
         st.markdown("---")
         st.markdown("### 🤝 Correlation between Ratings and Sentiment")
-        st.info("This section shows if higher ratings correlate with more positive sentiment in open-ended feedback.")
+        st.info("This section shows if higher ratings correlate with more positive sentiment in open-ended feedback (based on sampled data).")
         correlation_found = False
         for sent_col in sentiment_columns:
-            # Extract the original question name
             original_q = sent_col.replace("_Sentiment_Score", "")
             for num_col in numerical_rating_columns:
+                # Use analysis_df which now contains sentiment scores for the *sampled* rows
                 temp_df = analysis_df[[num_col, sent_col]].dropna()
                 if not temp_df.empty and len(temp_df) > 1: # Need at least 2 data points for correlation
                     correlation = temp_df[num_col].corr(temp_df[sent_col])
@@ -428,8 +481,6 @@ if uploaded_file:
                         st.write(f"- **Correlation between `{num_col}` and sentiment for `{original_q}`:** `{correlation:.2f}`")
                         st.caption("A positive correlation indicates higher ratings are associated with more positive sentiment.")
                         correlation_found = True
-                    # else: (no need for explicit message if NaN, handled by parent if)
-                # else: (no need for explicit message if empty, handled by parent if)
         if not correlation_found:
             st.info("No meaningful correlation data found between numerical ratings and open-ended sentiment.")
 
@@ -438,27 +489,26 @@ if uploaded_file:
     if selected_date_column != "None (Skip Trend Analysis)" and sentiment_columns:
         st.markdown("---")
         st.markdown("### 🗓 Sentiment Trends Over Time")
+        st.info("Trend analysis based on *sampled* data.")
         for sent_col in sentiment_columns:
             original_q = sent_col.replace("_Sentiment_Score", "")
+            # Ensure we're using analysis_df with potentially filtered/re-indexed rows
             trend_df = analysis_df.dropna(subset=[selected_date_column, sent_col]).copy()
 
             if not trend_df.empty:
                 # Group by date and calculate mean sentiment score
                 daily_sentiment = trend_df.groupby(selected_date_column)[sent_col].mean().reset_index()
-                # Optional: Resample to weekly/monthly for smoother trends if data is dense
-                # daily_sentiment.set_index(selected_date_column, inplace=True)
-                # weekly_sentiment = daily_sentiment.resample('W')[sent_col].mean().reset_index() # or 'M' for monthly
 
                 fig_trend = px.line(
                     daily_sentiment,
                     x=selected_date_column,
                     y=sent_col,
-                    title=f"Average Sentiment Score for '{original_q}' Over Time"
+                    title=f"Average Sentiment Score for '{original_q}' Over Time (Sampled)"
                 )
                 fig_trend.update_layout(yaxis_title="Average Sentiment Score (-1 to 1)")
                 st.plotly_chart(fig_trend, use_container_width=True)
             else:
-                st.info(f"No sentiment data for '{original_q}' to plot trends over time with the selected date column.")
+                st.info(f"No sentiment data for '{original_q}' to plot trends over time with the selected date column from sampled data.")
     elif selected_date_column != "None (Skip Trend Analysis)" and not sentiment_columns:
         st.info("No open-ended questions with sentiment analysis found to plot trends.")
 
