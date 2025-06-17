@@ -15,7 +15,7 @@ import numpy as np
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-pro")
+model = genai.GenerativeModel("gemini-2.0-flash")
 
 st.set_page_config(
     page_title="Executive Feedback Analyzer",
