@@ -6,6 +6,5 @@ streamlit-chat
 plotly
 wordcloud
 matplotlib
-streamlit-feedback
 numpy
 openpyxl
