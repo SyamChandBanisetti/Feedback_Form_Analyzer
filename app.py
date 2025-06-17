@@ -2,7 +2,7 @@ import os
 import io
 import streamlit as st
 import pandas as pd
-#from dotenv import load_dotenv
+from dotenv import load_dotenv
 import google.generativeai as genai
 from streamlit_chat import message
 import plotly.express as px
